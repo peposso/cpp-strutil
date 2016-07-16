@@ -1,7 +1,15 @@
 #include <string>
 #include <vector>
+#include <sstream>  // TODO: remove.
 
 namespace strutil {
+
+template<bool cond, class T = void>
+using enable_if_t = typename std::enable_if<cond, T>::type;
+
+template<bool cond>
+using enable_when = enable_if_t<cond, std::nullptr_t>;
+
 
 class fail : public std::runtime_error {
 public:
@@ -11,7 +19,7 @@ public:
 
 
 inline
-std::string lower(const std::string& s){
+std::string lower(const std::string& s) {
     std::string r(0, ' ');
     r.reserve(s.size());
     for (const auto& c: s) {
@@ -21,7 +29,7 @@ std::string lower(const std::string& s){
 }
 
 inline
-std::string upper(const std::string& s){
+std::string upper(const std::string& s) {
     std::string r(0, ' ');
     r.reserve(s.size());
     for (const auto& c: s) {
@@ -69,7 +77,7 @@ std::string padleft(const std::string& s, size_t width, const char c=' ') {
 }
 
 inline
-std::string reverse(const std::string& s) {
+std::string reversed(const std::string& s) {
     size_t len = s.size();
     std::string r(0, ' ');
     r.reserve(len);
@@ -78,6 +86,16 @@ std::string reverse(const std::string& s) {
         if (i == 0) break;
     }
     return r;
+}
+
+inline
+void reverse(std::string& s) {
+    size_t len = s.size();
+    for (size_t i = 0; i < len / 2; ++i) {
+        char tmp = s[i];
+        s[i] = s[len - 1 - i];
+        s[len - 1 - i] = tmp;
+    }
 }
 
 inline
@@ -96,6 +114,8 @@ std::vector<std::string> split(const std::string& s, const char delim)
     v.push_back(buf);
     return v;
 }
+
+namespace _detail {
 
 inline
 std::string u8char(uint32_t uc) {
@@ -129,37 +149,125 @@ std::string u8char(uint32_t uc) {
     throw fail("unknown unicode");
 }
 
-inline bool isdigit_(const char c) { return '0' <= c && c <= '9'; }
+inline
+char itoc(int i, bool upper=false) {
+    return i > 9 ? (upper ? 'A' : 'a') + i - 10 : '0' + i;
+}
+
+inline
+void extend(std::string& s, int count, char c) {
+    s.reserve(s.size() + count);
+    for (int i = 0; i < count; ++i) s.push_back(c);
+}
+
+inline
+std::string intformatter(int64_t i, int radix=10, bool upper=false,
+                         char sign=0, char padchar=' ', int width=0, bool alignleft=false) {
+    if (i < 0) sign = '-';
+    if (padchar == '0' && alignleft) padchar = '\0';  // ignore zero flag.
+    if (sign && width > 0) width--;
+    std::string buf;
+    if (width > 0) buf.reserve(width);
+    int64_t r = i < 0 ? -i : i;
+    while (r > 0) {
+        buf.push_back(itoc(r % radix, upper));
+        r /= radix;
+    }
+    if (i == 0) buf = "0";
+    int padding = width - buf.size() - (sign ? 1 : 0);
+    if (padding > 0 && padchar == '0') {
+        extend(buf, padding, '0');
+        padding = 0;
+    }
+    if (sign) {
+        buf.push_back(sign);
+    }
+    if (padding > 0) {
+        if (alignleft) {
+            reverse(buf);
+            extend(buf, padding, padchar);
+        } else {
+            extend(buf, padding, padchar);
+            reverse(buf);
+        }
+        return buf;
+    }
+    reverse(buf);
+    return buf;
+}
+
+inline
+std::string uintformatter(uint64_t i, int radix=10, bool upper=false,
+                          char sign=0, char padchar=' ', int width=0, bool alignleft=false) {
+    if (padchar == '0' && alignleft) padchar = '\0';  // ignore zero flag.
+    if (sign && width > 0) width--;
+    std::string buf;
+    if (width > 0) buf.reserve(width);
+    uint64_t r = i;
+    while (r > 0) {
+        buf.push_back(itoc(r % radix, upper));
+        r /= radix;
+    }
+    if (i == 0) buf = "0";
+    int padding = width - buf.size() - (sign ? 1 : 0);
+    if (padding > 0 && padchar == '0') {
+        extend(buf, padding, '0');
+        padding = 0;
+    }
+    if (sign) {
+        buf.push_back(sign);
+    }
+    if (padding > 0) {
+        if (alignleft) {
+            reverse(buf);
+            extend(buf, padding, padchar);
+        } else {
+            extend(buf, padding, padchar);
+            reverse(buf);
+        }
+        return buf;
+    }
+    reverse(buf);
+    return buf;
+}
+
+inline
+std::string floatformatter(double d, int precision=6,
+                           char sign='\0', char padchar='\0', int width=0) {
+    std::stringstream ss;
+    ss << d;
+    return ss.str();
+}
+
+inline bool isdigit(const char c) { return '0' <= c && c <= '9'; }
+
+template<size_t I = 0, class F, class...T, enable_when<I == sizeof...(T)> = nullptr>
+std::string call_for_index(int, std::tuple<T...>&, F) {
+    return "";
+}
+
+template<size_t I = 0, class F, class...T, enable_when<I < sizeof...(T)> = nullptr>
+std::string call_for_index(int index, std::tuple<T...>& t, F f) {
+    return index == 0 ? f(std::get<I>(t)) : call_for_index<I + 1, F, T...>(index-1, t, f);
+}
+
+}  // namespace _detail
 
 struct formaterror : public fail {
     formaterror(const char* s) :fail(s) {}
 };
 
-extern void* enabler;
-#define ENABLE_WHEN(cond) typename std::enable_if<cond, void>::type*& = enabler
-
-template<size_t I = 0, class F, class...T, ENABLE_WHEN(I == sizeof...(T))>
-std::string for_index(int, std::tuple<T...>&, F) {
-    return "";
-}
-
-template<size_t I = 0, class F, class...T, ENABLE_WHEN(I < sizeof...(T))>
-std::string for_index(int index, std::tuple<T...>& t, F f) {
-    return index == 0 ? f(std::get<I>(t)) : for_index<I + 1, F, T...>(index-1, t, f);
-}
-
 struct formatter_ {
     std::string str;
     char conv = '\0';
-    bool minus = false;
-    bool plus = false;
-    bool space = false;
     bool sharp = false;
-    bool zero = false;
-    bool dot = false;
-    int width = -1;
-    int width2 = -1;
+    char sign = 0;
+    char padchar = ' ';
+    bool alignleft = false;
+    int width = 0;
+    int precision = 6;
 
+    inline
     formatter_(const std::string& s, size_t start=0) {
         size_t i = start;
         if (s[i] != '%')
@@ -167,49 +275,48 @@ struct formatter_ {
         i++;
         for (; i < s.size(); ++i) {
             switch (s[i]) {
-                case '-': { minus = true; continue; }
-                case '+': { plus = true; continue; }
-                case ' ': { space = true; continue; }
+                case '-': { alignleft = true; continue; }
+                case '+': { sign = '+'; continue; }
+                case ' ': { sign = ' '; continue; }
                 case '#': { sharp = true; continue; }
-                case '0': { zero = true; continue; }
+                case '0': { padchar = '0'; continue; }
             }
             break;
         }
-        if (isdigit_(s[i])) { width = s[i] - '0'; i++; }
-        if (isdigit_(s[i])) { width = width * 10 + s[i] - '0'; i++; }
+        if (_detail::isdigit(s[i])) { width = s[i] - '0'; i++; }
+        if (_detail::isdigit(s[i])) { width = width * 10 + s[i] - '0'; i++; }
         if (s[i] == '.') {
-            dot = true;
             i++;
-            if (isdigit_(s[i])) { width2 = s[i] - '0'; i++; }
-            if (isdigit_(s[i])) { width2 = width2 * 10 + s[i] - '0'; i++; }
+            if (_detail::isdigit(s[i])) { precision = s[i] - '0'; i++; }
+            if (_detail::isdigit(s[i])) { precision = precision * 10 + s[i] - '0'; i++; }
         }
-        if (isdigit_(s[i]))
+        if (_detail::isdigit(s[i]))
             throw formaterror("invalid format (width or precision too long)");
         conv = s[i++];
         str = s.substr(start, i - start);
     }
 
-    template<class T, ENABLE_WHEN(std::is_integral<T>::value)>
+    template<class T, enable_when<std::is_integral<T>::value> = nullptr>
     std::string operator()(T t) {
         switch (conv) {
             case 'c': {
                 if (sizeof(T) > sizeof(uint32_t))
                     throw formaterror("type mismatch: larger than uint32_t");
-                return pad(u8char(t));
+                return pad(_detail::u8char(t));
             }
-            case 'd': case 'i': { return itos(t); }
-            case 'u': { return utos(t); }
-            case 'o': { return utos(t, 8); }
-            case 'x': case 'X': { return itos(t, 16, conv == 'X'); }
-            case 'b': { return itos(t, 2); }
+            case 'd': case 'i': { return _detail::intformatter(t, 10, false, sign, padchar, width, alignleft); }
+            case 'u': { return _detail::uintformatter(t, 10, false, sign, padchar, width, alignleft); }
+            case 'o': { return _detail::uintformatter(t, 8, false, sign, padchar, width, alignleft); }
+            case 'x': case 'X': { return _detail::uintformatter(t, 16, conv == 'X', sign, padchar, width, alignleft); }
+            case 'b': { return _detail::uintformatter(t, 2, false, sign, padchar, width, alignleft); }
             case 'f': { throw formaterror("type mismatch: int to float"); }
-            case 's': { return itos(t); }
+            case 's': { return _detail::intformatter(t, 10, false, sign, padchar, width, alignleft); }
             case 'p': { throw formaterror("type mismatch: int to ptr"); }
         }
         throw formaterror("unknown format");
     }
 
-    template<class T, ENABLE_WHEN(std::is_floating_point<T>::value)>
+    template<class T, enable_when<std::is_floating_point<T>::value> = nullptr>
     std::string operator()(T t) {
         switch (conv) {
             case 'c': { throw formaterror("type mismatch: float to char"); }
@@ -218,9 +325,9 @@ struct formatter_ {
             case 'o':
             case 'x': case 'X':
             case 'b': { throw formaterror("type mismatch: float to int"); }
-            case 'f': { return ftos(t); }
-            case 's': { return ftos(t); }
-            case 'p': { return ptos((void*)(uint64_t)t); }
+            case 'f': { return _detail::floatformatter(t, precision); }
+            case 's': { return _detail::floatformatter(t, precision); }
+            case 'p': { throw formaterror("type mismatch: float to ptr"); }
         }
         throw formaterror("unknown format");
     }
@@ -236,15 +343,21 @@ struct formatter_ {
             case 'b': { throw formaterror("type mismatch: str to int"); }
             case 'f': { throw formaterror("type mismatch: str to float"); }
             case 's': { return pad(t); }
-            case 'p': { return ptos((void*)t.c_str()); }
+            case 'p': { throw formaterror("type mismatch: str to pointer"); }
         }
         throw formaterror("unknown format");
     }
 
     inline
     std::string operator()(char* t) {
-        if (conv == 'p' || conv == 's') return ptos(t);
-        return std::string(t);
+        if (conv == 'p') return ptos(t);
+        return operator()(std::string(t));
+    }
+
+    inline
+    std::string operator()(const char* t) {
+        if (conv == 'p') return ptos(t);
+        return operator()(std::string(t));
     }
 
     inline
@@ -258,90 +371,17 @@ struct formatter_ {
         if (w == -1) w = width;
         if (s.size() > 99) return s;
         if (w <= (int)s.size()) return s;
-        if (minus) {
+        if (alignleft) {
             return padright(s, w, ' ');
         } else {
-            return padleft(s, w, zero ? '0' : ' ');
+            return padleft(s, w, padchar);
         }
-    }
-
-    inline
-    std::string itos(int64_t i, int radix=10, bool upper=false) {
-        std::string buf;
-        int64_t n = i < 0 ? -i : i;
-        while (n > 0) {
-            int d = n % radix;
-            if (d > 9) {
-                buf.push_back((upper ? 'A' : 'a') + d - 10);
-            } else {
-                buf.push_back('0' + d);
-            }
-            n /= radix;
-        }
-        if (buf.size() == 0) buf = "0";
-        char pre = i < 0 ? '-' :
-                   plus ? '+' :
-                   space ? ' ' : 0;
-        buf = reverse(buf);
-        buf = pad(buf, width - (pre != 0 ? 1 : 0));
-        if (pre != 0) { buf.insert(0, 1, pre); }
-        return buf;
-    }
-
-    inline
-    std::string utos(uint64_t u, int radix=10, bool upper=false) {
-        std::string buf;
-        uint64_t n = u;
-        while (n > 0) {
-            int d = n % radix;
-            if (d > 9) {
-                buf.push_back((upper ? 'A' : 'a') + d - 10);
-            } else {
-                buf.push_back('0' + d);
-            }
-            n /= radix;
-        }
-        if (buf.size() == 0) buf = "0";
-        return pad(reverse(buf));
     }
 
     template<class T>
     std::string ptos(T* ptr) {
-        width = -1;
-        zero = true;
         auto i = reinterpret_cast<uintptr_t>(ptr);
-        return "0x" + utos(static_cast<uint64_t>(i), 16);
-    }
-
-    inline
-    std::string ftos(double d) {
-        // TODO: rafactoring
-        auto tmp_width = width;
-        auto tmp_minus = minus;
-        auto tmp_space = space;
-        auto tmp_zero = zero;
-
-        if (minus) {
-            width = -1;
-            minus = false;
-        } else {
-            width = width - (width2 >= 0 ? width2 : 6) - 1;
-        }
-        auto r1 = itos(static_cast<int64_t>(d));
-
-        width = width2 >= 0 ? width2 : 6;
-        zero = true;
-        auto d2 = d - static_cast<int64_t>(d);
-        d2 = d2 < 0 ? -d2 : d2;
-        for (auto i = 0; i < width; ++i) d2 *= 10.0;
-        auto r2 = utos(static_cast<uint64_t>(d2));
-
-        width = tmp_width;
-        minus = tmp_minus;
-        space = tmp_space;
-        zero = tmp_zero;
-        auto r = r1 + "." + r2;
-        return pad(r);
+        return "0x" + _detail::uintformatter(static_cast<uint64_t>(i), 16);
     }
 };
 
@@ -365,7 +405,7 @@ std::string format(const std::string& fmt, A...a) {
                 throw fail("formaterror(): no arg");
             auto f = formatter_(fmt, i);
             i += f.str.size() - 1;
-            buf.append(for_index(argc-1, args, f));
+            buf.append(_detail::call_for_index(argc-1, args, f));
         }
     }
     if (argc != sizeof...(A))
